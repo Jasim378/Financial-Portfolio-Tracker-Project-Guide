@@ -14,22 +14,23 @@ names = ['Jasim', 'Deloitte HR', 'Guest User']
 usernames = ['jasim378', 'hr_deloitte', 'guest']
 passwords = ['jasim123', 'admin123', 'guest123']
 
-hashed_passwords = stauth.Hasher(passwords).generate()
-
+# Authenticator setup
 authenticator = stauth.Authenticate(
     {'usernames': {
-        usernames[0]: {'name': names[0], 'password': hashed_passwords[0]},
-        usernames[1]: {'name': names[1], 'password': hashed_passwords[1]},
-        usernames[2]: {'name': names[2], 'password': hashed_passwords[2]}
+        usernames[0]: {'name': names[0], 'password': passwords[0]},
+        usernames[1]: {'name': names[1], 'password': passwords[1]},
+        usernames[2]: {'name': names[2], 'password': passwords[2]}
     }},
-    'portfolio_dashboard', 'auth_key', cookie_expiry_days=30
+    'portfolio_dashboard', 
+    'auth_key',            
+    cookie_expiry_days=30
 )
 
 # --- 2. LOGIN / SIGNUP UI ---
 tab1, tab2 = st.tabs(["🔑 Login", "📝 Register"])
 
 with tab1:
-    name, authentication_status, username = authenticator.login('Login', 'main')
+    name, authentication_status, username = authenticator.login('main')
     st.info("💡 **Demo Credentials:** User: `guest` | Pass: `guest123` (HR Demo ke liye)")
 
 with tab2:
@@ -50,7 +51,6 @@ elif authentication_status:
     authenticator.logout('Logout', 'sidebar')
     st.sidebar.success(f'Authenticated: {name}')
 
-    # Modern Custom CSS
     st.markdown("""
         <style>
         .main { background-color: #0d1117; }
@@ -66,7 +66,6 @@ elif authentication_status:
     st.markdown(f"**Institutional Grade Risk Analysis** | Welcome, {name}")
     st.divider()
 
-    # --- SIDEBAR CONTROLS ---
     with st.sidebar:
         st.header("⚙️ Quant Controls")
         tickers_input = st.text_input("Enter Tickers (Separated by comma)", "RELIANCE.NS, TCS.NS, NVDA, AAPL")
@@ -88,21 +87,18 @@ elif authentication_status:
                     df = df.ffill().dropna()
                     returns = df.pct_change().dropna()
 
-                    # Core Quant Calculations
                     weights = np.array([1/len(tickers)] * len(tickers))
                     port_ret = np.sum(returns.mean() * weights) * 252
                     port_vol = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
                     sharpe = (port_ret - 0.05) / port_vol if port_vol != 0 else 0
                     var_95 = np.percentile(returns.dot(weights), 5)
 
-                    # --- METRICS DISPLAY ---
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Annual Return", f"{port_ret:.2%}")
                     m2.metric("Portfolio Risk", f"{port_vol:.2%}")
                     m3.metric("Sharpe Ratio", f"{sharpe:.2f}")
                     m4.metric("Max 1-Day Loss (VaR)", f"₹{abs(var_95 * investment):,.0f}")
 
-                    # --- AI GAUGE ---
                     st.divider()
                     score = int(min(max((sharpe * 30) + 40, 0), 100))
                     c1, c2 = st.columns([1, 2])
@@ -121,7 +117,6 @@ elif authentication_status:
                         elif score > 40: st.warning("### ⚠️ HOLD\nModerate risk detected.")
                         else: st.error("### ❌ AVOID\nHigh risk, low returns.")
 
-                    # --- CHARTS TABS ---
                     t1, t2, t3 = st.tabs(["📈 Performance", "🔗 Correlation", "🔮 Forecast"])
                     
                     with t1:
@@ -130,7 +125,6 @@ elif authentication_status:
                     with t2:
                         if len(tickers) > 1:
                             st.plotly_chart(px.imshow(returns.corr(), text_auto=True, color_continuous_scale='RdBu_r', template="plotly_dark"), use_container_width=True)
-                            
                         else:
                             st.info("Correlation ke liye 2+ stocks dalein.")
                     
@@ -141,9 +135,7 @@ elif authentication_status:
                         for s in sims: fig_sim.add_trace(go.Scatter(y=s, mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
                         fig_sim.update_layout(template="plotly_dark", title="Monte Carlo Simulation")
                         st.plotly_chart(fig_sim, use_container_width=True)
-                        
 
-                    # --- HISTORICAL LOOKUP ---
                     st.divider()
                     st.subheader("📅 Historical Price Lookup")
                     target_date = st.date_input("Select Date", value=df.index[-1], min_value=df.index[0], max_value=df.index[-1])
