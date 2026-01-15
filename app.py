@@ -1,174 +1,162 @@
 import streamlit as st
-import streamlit_authenticator as stauth
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import nltk
 
-# --- 1. SETTINGS & AUTH CONFIG ---
-# Page config sabse pehle hona chahiye
-st.set_page_config(page_title="Alpha-Quant Intelligence", layout="wide", page_icon="🏦")
+# Initialize NLTK for Sentiment Analysis
+try:
+    nltk.data.find('sentiment/vader_lexicon.zip')
+except LookupError:
+    nltk.download('vader_lexicon')
 
-# User Credentials
-names = ['Jasim', 'Deloitte HR', 'Guest User']
-usernames = ['jasim378', 'hr_deloitte', 'guest']
-passwords = ['jasim123', 'admin123', 'guest123']
+# --- 1. PAGE CONFIGURATION ---
+st.set_page_config(page_title="Alpha-Quant Multi-Asset Terminal", layout="wide", page_icon="🌍")
 
-# Authenticator setup (Latest Syntax)
-authenticator = stauth.Authenticate(
-    {'usernames': {
-        usernames[0]: {'name': names[0], 'password': passwords[0]},
-        usernames[1]: {'name': names[1], 'password': passwords[1]},
-        usernames[2]: {'name': names[2], 'password': passwords[2]}
-    }},
-    'portfolio_dashboard', 
-    'auth_key',            
-    cookie_expiry_days=30
-)
+# Professional Theme CSS
+st.markdown("""
+    <style>
+    .main { background-color: #0d1117; color: #e6edf3; }
+    div[data-testid="stMetric"] { 
+        background-color: #161b22; border: 1px solid #30363d; 
+        border-radius: 12px; padding: 20px; 
+    }
+    .stButton>button { 
+        background: linear-gradient(90deg, #00d4ff 0%, #0055ff 100%); 
+        color: white; border: none; font-weight: bold; width: 100%; height: 3.5em;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- 2. LOGIN / SIGNUP UI ---
-tab1, tab2 = st.tabs(["🔑 Login", "📝 Register"])
-
-with tab1:
-    # Latest version login call
-    authenticator.login(location='main')
-
-    # session_state se status check (TypeError Fix)
-    authentication_status = st.session_state.get("authentication_status")
-    name = st.session_state.get("name")
-
-    st.divider()
-    st.markdown("### 🌐 Or Login with (Enterprise SSO):")
-    col_g1, col_g2 = st.columns(2)
-    col_g1.button("Google", icon="🌐", use_container_width=True, help="Enterprise SSO integration in progress")
-    col_g2.button("LinkedIn", icon="🔗", use_container_width=True, help="Enterprise SSO integration in progress")
-    st.info("💡 **Demo Access:** User: `guest` | Pass: `guest123` (For HR Review)")
-
-with tab2:
+# --- 2. ANALYTICS ENGINES ---
+def get_sentiment(ticker):
     try:
-        # Fixed: Added location='main' for registration tab
-        if authenticator.register_user(location='main'):
-            st.success('User registered successfully! Now go to Login tab.')
-    except Exception as e:
-        st.error(f"Registration Error: {e}")
+        t = yf.Ticker(ticker)
+        news = t.news[:3]
+        if not news: return 0, "Neutral"
+        sid = SentimentIntensityAnalyzer()
+        score = np.mean([sid.polarity_scores(n['title'])['compound'] for n in news])
+        label = "BULLISH" if score > 0.05 else "BEARISH" if score < -0.05 else "NEUTRAL"
+        return score, label
+    except: return 0, "N/A"
 
-# --- 3. MAIN DASHBOARD LOGIC ---
-if authentication_status == False:
-    st.error('Username/password galat hai. Kripya dubara koshish karein.')
-elif authentication_status == None:
-    st.warning('Kripya login karein ya guest credentials use karein.')
+def get_tech_signals(data):
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    sma_20 = data.rolling(window=20).mean()
+    sma_50 = data.rolling(window=50).mean()
+    return rsi.iloc[-1], sma_20.iloc[-1], sma_50.iloc[-1]
 
-elif authentication_status:
-    # --- SUCCESSFUL LOGIN ---
-    authenticator.logout(location='sidebar')
-    st.sidebar.success(f'Authenticated: {name}')
+# --- 3. DASHBOARD UI ---
+st.title("⚖️ Alpha-Quant Global Intelligence")
+st.markdown("`Multi-Asset Risk Engine | Stocks • Crypto • Commodities • Forex`")
+st.divider()
 
-    # Professional Theme CSS
-    st.markdown("""
-        <style>
-        .main { background-color: #0d1117; }
-        div[data-testid="stMetric"] { background-color: #161b22; border-radius: 10px; border-left: 5px solid #00d4ff; padding: 15px; }
-        .stButton>button { 
-            background: linear-gradient(90deg, #00d4ff 0%, #0055ff 100%); 
-            color: white; border-radius: 8px; font-weight: bold; border: none; height: 3.5em; width: 100%;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-    st.title("⚖️ Alpha-Quant Portfolio Advisor")
-    st.markdown(f"**Institutional Grade Risk Analysis** | Welcome, {name}")
-    st.divider()
-
-    # --- SIDEBAR CONTROLS ---
-    with st.sidebar:
-        st.header("⚙️ Quant Controls")
-        tickers_input = st.text_input("Enter Tickers (Separated by comma)", "RELIANCE.NS, TCS.NS, NVDA, AAPL")
-        investment = st.number_input("Investment Capital", value=100000)
-        period = st.selectbox("Lookback Period", ["1y", "2y", "5y", "max"])
-        analyze_btn = st.button("RUN ENGINE")
-
-    if analyze_btn:
-        tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
-        
-        try:
-            with st.spinner('Calculating Financial Metrics...'):
-                data_raw = yf.download(tickers, period=period, auto_adjust=True)
-                
-                if data_raw.empty:
-                    st.error("Data fetch nahi hua. Symbols check karein.")
-                else:
-                    df = data_raw['Close'] if len(tickers) > 1 else pd.DataFrame(data_raw['Close'], columns=tickers)
-                    df = df.ffill().dropna()
-                    returns = df.pct_change().dropna()
-
-                    # Quant Engine Calculations
-                    weights = np.array([1/len(tickers)] * len(tickers))
-                    port_ret = np.sum(returns.mean() * weights) * 252
-                    port_vol = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
-                    sharpe = (port_ret - 0.05) / port_vol if port_vol != 0 else 0
-                    var_95 = np.percentile(returns.dot(weights), 5)
-
-                    # --- METRICS DISPLAY ---
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Annual Return", f"{port_ret:.2%}")
-                    m2.metric("Portfolio Risk", f"{port_vol:.2%}")
-                    m3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-                    m4.metric("Max 1-Day Loss (VaR)", f"₹{abs(var_95 * investment):,.0f}")
-
-                    # --- AI GAUGE ---
-                    st.divider()
-                    score = int(min(max((sharpe * 30) + 40, 0), 100))
-                    c1, col_gauge = st.columns([1, 2])
-                    with c1:
-                        fig_gauge = go.Figure(go.Indicator(
-                            mode="gauge+number", value=score, title={'text': "AI Health Score"},
-                            gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#00d4ff"},
-                                   'steps': [{'range': [0, 40], 'color': "#3e1c1c"},
-                                             {'range': [75, 100], 'color': "#1c3e1c"}]}))
-                        fig_gauge.update_layout(height=280, template="plotly_dark", margin=dict(t=50, b=10))
-                        st.plotly_chart(fig_gauge, use_container_width=True)
-                    
-                    with col_gauge:
-                        st.subheader("🤖 AI Verdict")
-                        if score > 65: st.success("### ✅ STRONG BUY\nEfficient portfolio with high Sharpe ratio.")
-                        elif score > 40: st.warning("### ⚠️ HOLD\nModerate risk detected. Rebalancing suggested.")
-                        else: st.error("### ❌ AVOID\nPoor risk-reward ratio. High volatility detected.")
-
-                    # --- CHARTS TABS ---
-                    t1, t2, t3 = st.tabs(["📈 Performance", "🔗 Correlation", "🔮 Forecast"])
-                    
-                    with t1:
-                        st.plotly_chart(px.line((df / df.iloc[0]) * 100, template="plotly_dark", title="Cumulative Growth"), use_container_width=True)
-                        
-                    
-                    with t2:
-                        if len(tickers) > 1:
-                            st.plotly_chart(px.imshow(returns.corr(), text_auto=True, color_continuous_scale='RdBu_r', template="plotly_dark"), use_container_width=True)
-                            
-                        else:
-                            st.info("Correlation analysis ke liye 2+ stocks dalein.")
-                    
-                    with t3:
-                        # Monte Carlo Simulation
-                        mu, sigma = returns.dot(weights).mean(), returns.dot(weights).std()
-                        sims = [investment * np.cumprod(1 + np.random.normal(mu, sigma, 252)) for _ in range(30)]
-                        fig_sim = go.Figure()
-                        for s in sims: fig_sim.add_trace(go.Scatter(y=s, mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
-                        fig_sim.update_layout(template="plotly_dark", title="Monte Carlo 1-Year Forecast")
-                        st.plotly_chart(fig_sim, use_container_width=True)
-
-                    # --- HISTORICAL LOOKUP ---
-                    st.divider()
-                    st.subheader("📅 Historical Price Lookup")
-                    target_date = st.date_input("Select Date", value=df.index[-1], min_value=df.index[0], max_value=df.index[-1])
-                    nearest_idx = df.index.get_indexer([pd.to_datetime(target_date)], method='nearest')[0]
-                    nearest_date = df.index[nearest_idx]
-                    st.write(f"**Data for: {nearest_date.strftime('%d %B %Y')}**")
-                    st.write(df.loc[nearest_date])
-
-        except Exception as e:
-            st.error(f"Quant Engine Error: {e}")
+with st.sidebar:
+    st.header("🌍 Global Asset Config")
+    
+    # Preset Selection
+    preset = st.selectbox("Select Asset Preset", ["Custom", "Balanced Global", "Inflation Hedge", "High Growth Tech"])
+    
+    if preset == "Balanced Global":
+        default_tickers = "AAPL, MSFT, GC=F, BTC-USD, EURUSD=X"
+    elif preset == "Inflation Hedge":
+        default_tickers = "GC=F, CL=F, TIP, XOM, IAU"
+    elif preset == "High Growth Tech":
+        default_tickers = "NVDA, TSLA, AMD, QQQ, ETH-USD"
     else:
-        st.info("👈 Side menu se stocks select karein aur RUN ENGINE dabayein.")
+        default_tickers = "RELIANCE.NS, TCS.NS, AAPL, GC=F, BTC-USD"
+
+    tickers_input = st.text_area("Asset Symbols (Separate by comma)", default_tickers)
+    benchmark_ticker = st.text_input("Benchmark (Alpha Ref)", "^GSPC") 
+    capital = st.number_input("Capital Allocation", value=100000)
+    history = st.selectbox("Lookback Period", ["1y", "2y", "5y"])
+    
+    st.divider()
+    st.subheader("🛡️ Stress Test")
+    crash_val = st.slider("Simulate Market Drop (%)", 0, 50, 15)
+    run_engine = st.button("EXECUTE QUANT ENGINE")
+
+# --- 4. ENGINE EXECUTION ---
+if run_engine:
+    tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    
+    try:
+        with st.spinner('Syncing Global Markets...'):
+            all_tickers = tickers + [benchmark_ticker]
+            raw_data = yf.download(all_tickers, period=history)['Close']
+            
+            df = raw_data[tickers].ffill().dropna()
+            bench_df = raw_data[benchmark_ticker].ffill().dropna()
+            returns = df.pct_change().dropna()
+            
+            # Optimization: Inverse Volatility (Weights adjusted by risk)
+            vols = returns.std() * np.sqrt(252)
+            weights = (1/vols) / (1/vols).sum()
+            
+            # Portfolio Metrics
+            port_daily_ret = returns.dot(weights)
+            ann_ret = np.sum(returns.mean() * weights) * 252
+            ann_vol = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
+            sharpe = (ann_ret - 0.05) / ann_vol
+            
+            # Metrics Display
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Exp. Annual Return", f"{ann_ret:.2%}")
+            m2.metric("Portfolio Volatility", f"{ann_vol:.2%}")
+            m3.metric("Sharpe Ratio", f"{sharpe:.2f}")
+            m4.metric("Assets Analyzed", len(tickers))
+
+            t1, t2, t3, t4 = st.tabs(["📊 Performance", "🎯 Asset Mix", "🧠 Signals & AI", "🔮 Risk Forecast"])
+
+            with t1:
+                combined_growth = pd.DataFrame({
+                    "Portfolio": (1 + port_daily_ret).cumprod() * 100,
+                    "Benchmark": (bench_df / bench_df.iloc[0]) * 100
+                })
+                st.plotly_chart(px.line(combined_growth, template="plotly_dark", title="Cumulative Growth (Portfolio vs Benchmark)"), use_container_width=True)
+                
+                drawdown = (combined_growth['Portfolio'] / combined_growth['Portfolio'].cummax()) - 1
+                st.plotly_chart(px.area(drawdown, title="Maximum Drawdown Analysis", color_discrete_sequence=['#ff4b4b'], template="plotly_dark"), use_container_width=True)
+
+            with t2:
+                col_l, col_r = st.columns(2)
+                with col_l:
+                    st.plotly_chart(px.pie(values=weights, names=tickers, hole=0.5, template="plotly_dark", title="Optimized Weight Distribution"))
+                with col_r:
+                    # Heatmap to show cross-asset relationships
+                    st.plotly_chart(px.imshow(returns.corr(), text_auto=True, color_continuous_scale='RdBu_r', template="plotly_dark", title="Cross-Asset Correlation Heatmap"), use_container_width=True)
+                    
+
+            with t3:
+                st.subheader("Institutional Signals & Sentiment")
+                sig_data = []
+                for t in tickers:
+                    score, label = get_sentiment(t)
+                    rsi, sma20, sma50 = get_tech_signals(df[t])
+                    trend = "🚀 Bullish" if sma20 > sma50 else "📉 Bearish"
+                    sig_data.append({"Ticker": t, "Sentiment": label, "RSI (14d)": round(rsi,2), "MA Trend": trend})
+                st.table(pd.DataFrame(sig_data))
+
+            with t4:
+                st.subheader("Monte Carlo Path Projection")
+                mu, sigma = port_daily_ret.mean(), port_daily_ret.std()
+                sims = [capital * np.cumprod(1 + np.random.normal(mu, sigma, 252)) for _ in range(30)]
+                fig_sim = go.Figure()
+                for s in sims: fig_sim.add_trace(go.Scatter(y=s, mode='lines', opacity=0.1, line=dict(color='#00d4ff'), showlegend=False))
+                fig_sim.update_layout(template="plotly_dark", title="1-Year Capital Projection (30 Stochastic Paths)")
+                st.plotly_chart(fig_sim, use_container_width=True)
+                
+                loss_val = capital * (crash_val / 100)
+                st.error(f"🚨 Crash Scenario: A {crash_val}% drop results in a potential loss of ${loss_val:,.0f}")
+
+    except Exception as e:
+        st.error(f"Terminal Error: {e}")
+else:
+    st.info("👈 Select a preset or enter symbols, then click 'EXECUTE QUANT ENGINE'.")
